@@ -74,8 +74,13 @@ get_env() {
   for container in $containers
   do
     dockerfile=$(oc exec $pod -c $container -- find /root/buildinfo -name "Dockerfile-openshift3-logging*")
-    echo Dockerfile info: $dockerfile > $env_file
-    oc exec $pod -c $container -- grep -o "\"build-date\"=\"[^[:blank:]]*\"" $dockerfile >> $env_file
+    if [[ ! $dockerfile ]]
+    then
+      echo Unable to get buildinfo for $pod - $container ... skipping
+    else
+      echo Dockerfile info: $dockerfile > $env_file
+      oc exec $pod -c $container -- grep -o "\"build-date\"=\"[^[:blank:]]*\"" $dockerfile >> $env_file
+    fi
     echo -- Environment Variables >> $env_file
     oc exec $pod -c $container -- env >> $env_file
   done
@@ -228,7 +233,12 @@ check_elasticsearch() {
   get_elasticsearch_status $anypod es
   echo -- Getting Elasticsearch OPS cluster info from logging-es-ops pod
   anypod=$(oc get po --selector="component=es-ops" --no-headers | grep Running | awk '{print$1}' | tail -1)
-  get_elasticsearch_status $anypod es-ops
+  if [[ ! $anypod ]]
+  then
+    echo No es-ops pods found. Skipping...
+  else
+    get_elasticsearch_status $anypod es-ops
+  fi
 }
 
 oc project logging

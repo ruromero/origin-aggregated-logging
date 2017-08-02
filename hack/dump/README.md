@@ -4,9 +4,10 @@
 `logging-dump.sh` is a tool to gather as much information as possible from your logging cluster. In order to run the script, the user must be logged in and have a administrative permissions on project `logging`
 
 Usage:
-
-`$ oc login -u admin https://openshift.example.com:8443`
-`$./logging-dump.sh [<component1> ... <componentN>]`
+```
+$ oc login -u admin https://openshift.example.com:8443
+$./logging-dump.sh [<component1> ... <componentN>]
+```
 
 Components:
 * kibana
