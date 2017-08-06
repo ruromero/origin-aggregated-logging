@@ -1,5 +1,9 @@
 #!/bin/bash
-set -x
+set -euo pipefail
+if [ -n "${DEBUG:-}" ] ; then
+    set -x
+fi
+
 if [[ $# -eq 0 ]]
 then
   all=true
@@ -21,7 +25,7 @@ do
       elasticsearch=true
       ;;
     *)
-      echo Unknown argument $key
+      echo Unknown argument $1
       exit 1
       ;;
   esac
@@ -59,7 +63,7 @@ get_project_info() {
   echo -- Secrets
   oc describe secrets > $project_folder/secrets
 
-  resource_types=(deploymentconfig configmap service route serviceaccount pv pvc pod)
+  resource_types=(deploymentconfig daemonset configmap service route serviceaccount pv pvc pod)
   for resource_type in ${resource_types[@]}
   do
     echo -- Extracting $resource_type ...
@@ -90,7 +94,10 @@ get_pod_logs() {
   local pod=$1
   local logs_folder=$2/logs
   echo -- POD $1 Logs
-  mkdir $logs_folder
+  if [ ! -d "$logs_folder" ]
+  then
+    mkdir $logs_folder
+  fi
   local containers=$(oc get po $pod -o jsonpath='{.spec.containers[*].name}')
   for container in $containers
   do
@@ -190,7 +197,7 @@ get_elasticsearch_status() {
   mkdir $cluster_folder
   scurl_es='curl -sv --max-time 5 --key /etc/elasticsearch/secret/admin-key --cert /etc/elasticsearch/secret/admin-cert --cacert /etc/elasticsearch/secret/admin-ca https://localhost:9200'
   curl_es='curl --max-time 5 --key /etc/elasticsearch/secret/admin-key --cert /etc/elasticsearch/secret/admin-cert --cacert /etc/elasticsearch/secret/admin-ca https://localhost:9200'
-  local cat_items=(health nodes indices aliases)
+  local cat_items=(health nodes indices aliases thread_pool)
   for cat_item in ${cat_items[@]}
   do
     oc exec $pod -- $scurl_es/_cat/$cat_item?v &> $cluster_folder/$cat_item

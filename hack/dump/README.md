@@ -51,6 +51,7 @@ Examples:
     |   │   ├── health
     |   │   ├── indices
     |   │   ├── nodes
+    |   │   ├── thread_pool    
     |   │   ├── pending_tasks
     |   │   ├── recovery
     |   │   ├── shards
@@ -60,6 +61,7 @@ Examples:
     |   │   ├── health
     |   │   ├── indices
     |   │   ├── nodes
+    |   │   ├── thread_pool 
     |   │   ├── pending_tasks
     |   │   ├── recovery
     |   │   ├── shards
@@ -82,6 +84,8 @@ Examples:
     └── project
         ├── configmap
         │   ├── ... # Configmaps
+        ├── daemonset
+        │   ├── ... # Daemonsets
         ├── deploymentconfig
         │   ├── ... # DeploymentConfigs
         ├── pod
