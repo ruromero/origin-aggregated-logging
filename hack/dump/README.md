@@ -82,23 +82,23 @@ Examples:
     │   ├── <logging-curator-pod>
     │   └── <logging-curator-ops-pod>
     └── project
-        ├── configmap
+        ├── configmaps
         │   ├── ... # Configmaps
-        ├── daemonset
+        ├── daemonsets
         │   ├── ... # Daemonsets
-        ├── deploymentconfig
+        ├── deploymentconfigs
         │   ├── ... # DeploymentConfigs
-        ├── pod
+        ├── pods
         │   ├── ... # Pods
-        ├── pv
+        ├── pvs
         │   ├── ... # Persistent Volumes
-        ├── pvc
+        ├── pvcs
         │   ├── ... # Persistent Volume Claims
-        ├── route
+        ├── routes
         │   ├── ... # Routes
-        ├── service
+        ├── services
         │   ├── ... # Services
-        ├── serviceaccount
+        ├── serviceaccounts
         │   ├── ... # Service Accounts
         ├── events
         ├── logging-project
