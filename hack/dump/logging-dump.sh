@@ -77,11 +77,9 @@ get_env() {
   containers=$(oc get po $pod -o jsonpath='{.spec.containers[*].name}')
   for container in $containers
   do
-    dockerfile=$(oc exec $pod -c $container -- find /root/buildinfo -name "Dockerfile-openshift3-logging*")
-    if [[ ! $dockerfile ]]
+    dockerfile=$(oc exec $pod -c $container -- find /root/buildinfo -name "Dockerfile-openshift3-logging*" || :)
+    if [ -n "$dockerfile" ]
     then
-      echo Unable to get buildinfo for $pod - $container ... skipping
-    else
       echo Dockerfile info: $dockerfile > $env_file
       oc exec $pod -c $container -- grep -o "\"build-date\"=\"[^[:blank:]]*\"" $dockerfile >> $env_file
     fi
@@ -117,10 +115,13 @@ check_fluentd_connectivity() {
   echo --Connectivity between $pod and elasticsearch-ops >> $fluentd_folder/$pod
   es_host=$(oc get pod $pod  -o jsonpath='{.spec.containers[0].env[?(@.name=="OPS_HOST")].value}')
   es_port=$(oc get pod $pod  -o jsonpath='{.spec.containers[0].env[?(@.name=="OPS_PORT")].value}')
-  echo "  with ca" >> $fluentd_folder/$pod
-  oc exec $pod -- curl -ILvs --key /etc/fluent/keys/key --cert /etc/fluent/keys/cert --cacert /etc/fluent/keys/ca -XGET https://$es_host:$es_port &>> $fluentd_folder/$pod
-  echo "  without ca" >> $fluentd_folder/$pod
-  oc exec $pod -- curl -ILkvs --key /etc/fluent/keys/key --cert /etc/fluent/keys/cert -XGET https://$es_host:$es_port &>> $fluentd_folder/$pod
+  if [ -n "$es_host" -a -n "$es_port" ] ; then
+    echo "ops cluster Elasticsearch"
+    echo "  with ca" >> $fluentd_folder/$pod
+    oc exec $pod -- curl -ILvs --key /etc/fluent/keys/key --cert /etc/fluent/keys/cert --cacert /etc/fluent/keys/ca -XGET https://$es_host:$es_port &>> $fluentd_folder/$pod
+    echo "  without ca" >> $fluentd_folder/$pod
+    oc exec $pod -- curl -ILkvs --key /etc/fluent/keys/key --cert /etc/fluent/keys/cert -XGET https://$es_host:$es_port &>> $fluentd_folder/$pod
+  fi
 }
 
 check_fluentd() {
@@ -148,10 +149,13 @@ check_curator_connectivity() {
   echo --Connectivity between $pod and elasticsearch-ops >> $curator_folder/$pod
   es_host=$(oc get pod $pod  -o jsonpath='{.spec.containers[0].env[?(@.name=="OPS_HOST")].value}')
   es_port=$(oc get pod $pod  -o jsonpath='{.spec.containers[0].env[?(@.name=="OPS_PORT")].value}')
-  echo "  with ca" >> $curator_folder/$pod
-  oc exec $pod -- curl -ILvs --key /etc/curator/keys/key --cert /etc/curator/keys/cert --cacert /etc/curator/keys/ca -XGET https://$es_host:$es_port &>> $curator_folder/$pod
-  echo "  without ca" >> $curator_folder/$pod
-  oc exec $pod -- curl -ILkvs --key /etc/curator/keys/key --cert /etc/curator/keys/cert -XGET https://$es_host:$es_port &>> $curator_folder/$pod
+  if [ -n "$es_host" -a -n "$es_port" ] ; then
+    echo "ops cluster Elasticsearch"
+    echo "  with ca" >> $curator_folder/$pod
+    oc exec $pod -- curl -ILvs --key /etc/curator/keys/key --cert /etc/curator/keys/cert --cacert /etc/curator/keys/ca -XGET https://$es_host:$es_port &>> $curator_folder/$pod
+    echo "  without ca" >> $curator_folder/$pod
+    oc exec $pod -- curl -ILkvs --key /etc/curator/keys/key --cert /etc/curator/keys/cert -XGET https://$es_host:$es_port &>> $curator_folder/$pod
+  fi
 }
 
 check_curator() {
@@ -195,12 +199,11 @@ get_elasticsearch_status() {
   local pod=$1
   local cluster_folder=$es_folder/cluster-$2
   mkdir $cluster_folder
-  scurl_es='curl -sv --max-time 5 --key /etc/elasticsearch/secret/admin-key --cert /etc/elasticsearch/secret/admin-cert --cacert /etc/elasticsearch/secret/admin-ca https://localhost:9200'
-  curl_es='curl --max-time 5 --key /etc/elasticsearch/secret/admin-key --cert /etc/elasticsearch/secret/admin-cert --cacert /etc/elasticsearch/secret/admin-ca https://localhost:9200'
+  curl_es='curl -s --max-time 5 --key /etc/elasticsearch/secret/admin-key --cert /etc/elasticsearch/secret/admin-cert --cacert /etc/elasticsearch/secret/admin-ca https://localhost:9200'
   local cat_items=(health nodes indices aliases thread_pool)
   for cat_item in ${cat_items[@]}
   do
-    oc exec $pod -- $scurl_es/_cat/$cat_item?v &> $cluster_folder/$cat_item
+    oc exec $pod -- $curl_es/_cat/$cat_item?v &> $cluster_folder/$cat_item
   done
   local health=$(oc exec $pod -- $curl_es/_cat/health?h=status)
   if [ $health != "green" ]
@@ -209,9 +212,9 @@ get_elasticsearch_status() {
     cat_items=(recovery shards pending_tasks)
     for cat_item in ${cat_items[@]}
     do
-      oc exec $pod -- $scurl_es/_cat/$cat_item?v &> $cluster_folder/$cat_item
+      oc exec $pod -- $curl_es/_cat/$cat_item?v &> $cluster_folder/$cat_item
     done
-    oc exec $pod -- $scurl_es/_cat/shards?h=index,shard,prirep,state,unassigned.reason,unassigned.description | grep UNASSIGNED &> $cluster_folder/unassigned_shards
+    oc exec $pod -- $curl_es/_cat/shards?h=index,shard,prirep,state,unassigned.reason,unassigned.description | grep UNASSIGNED &> $cluster_folder/unassigned_shards
   fi
 
 }
@@ -239,8 +242,8 @@ check_elasticsearch() {
   local anypod=$(oc get pods --selector="component=es" --no-headers | grep Running | awk '{print$1}' | tail -1)
   get_elasticsearch_status $anypod es
   echo -- Getting Elasticsearch OPS cluster info from logging-es-ops pod
-  anypod=$(oc get po --selector="component=es-ops" --no-headers | grep Running | awk '{print$1}' | tail -1)
-  if [[ ! $anypod ]]
+  anypod=$(oc get po --selector="component=es-ops" --no-headers | grep Running | awk '{print$1}' | tail -1 || :)
+  if [ -z "$anypod" ]
   then
     echo No es-ops pods found. Skipping...
   else
