@@ -142,7 +142,7 @@ check_fluentd_connectivity() {
 
 check_fluentd() {
   echo -- Checking Fluentd health
-  fluentd_pods=$(oc get pods | grep -o logging-fluentd-[^[:blank:]]*)
+  fluentd_pods=$(oc get pods -l logging-infra=fluentd -o jsonpath={.items[*].metadata.name})
   mkdir $fluentd_folder
   for pod in $fluentd_pods
   do
@@ -176,7 +176,7 @@ check_curator_connectivity() {
 
 check_curator() {
   echo -- Checking Curator health
-  local curator_pods=$(oc get pods | grep -o logging-curator-[^[:blank:]]*)
+  local curator_pods=$(oc get pods -l logging-infra=curator -o jsonpath={.items[*].metadata.name})
   mkdir $curator_folder
   for pod in $curator_pods
   do
@@ -200,7 +200,7 @@ check_kibana_connectivity() {
 
 check_kibana() {
   echo -- Checking Kibana health
-  kibana_pods=$(oc get pods | grep -o logging-kibana-[^[:blank:]]*)
+  kibana_pods=$(oc get pods -l logging-infra=kibana -o jsonpath={.items[*].metadata.name})
   mkdir $kibana_folder
   for pod in $kibana_pods
   do
@@ -212,8 +212,13 @@ check_kibana() {
 }
 
 get_elasticsearch_status() {
-  local pod=$1
-  local cluster_folder=$es_folder/cluster-$2
+  local comp=$1
+  local pod=${2:-""}
+  if [ -z "$pod" ] ; then
+      echo "Skipping elasticsearch status because no pod was found for $1"
+      return
+  fi
+  local cluster_folder=$es_folder/cluster-$comp
   mkdir $cluster_folder
   curl_es='curl -s --max-time 5 --key /etc/elasticsearch/secret/admin-key --cert /etc/elasticsearch/secret/admin-cert --cacert /etc/elasticsearch/secret/admin-ca https://localhost:9200'
   local cat_items=(health nodes indices aliases thread_pool)
@@ -245,7 +250,7 @@ list_es_storage() {
 check_elasticsearch() {
   echo Checking Elasticsearch health
   echo -- Checking Elasticsearch health
-  local es_pods=$(oc get pods | grep -o logging-es-[^[:blank:]]*)
+  local es_pods=$(oc get pods -l logging-infra=elasticsearch -o jsonpath={.items[*].metadata.name})
   mkdir $es_folder
   for pod in $es_pods
   do
@@ -254,17 +259,14 @@ check_elasticsearch() {
     get_pod_logs $pod $es_folder
     list_es_storage $pod
   done
-  echo -- Getting Elasticsearch cluster info from logging-es pod
-  local anypod=$(oc get pods --selector="component=es" --no-headers | grep Running | awk '{print$1}' | tail -1)
-  get_elasticsearch_status $anypod es
-  echo -- Getting Elasticsearch OPS cluster info from logging-es-ops pod
-  anypod=$(oc get po --selector="component=es-ops" --no-headers | grep Running | awk '{print$1}' | tail -1 || :)
-  if [ -z "$anypod" ]
-  then
-    echo No es-ops pods found. Skipping...
-  else
-    get_elasticsearch_status $anypod es-ops
-  fi
+
+  local anypod=""
+  for comp in "es" "es-ops"
+  do
+    echo -- Getting Elasticsearch cluster info from logging-${comp} pod
+    anypod=$(oc get po --selector="component=${comp}" --no-headers | grep Running | awk '{print$1}' | tail -1 || :)
+    get_elasticsearch_status ${comp} ${anypod}
+  done
 }
 
 oc project $NAMESPACE
