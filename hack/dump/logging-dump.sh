@@ -1,39 +1,55 @@
 #!/bin/bash
+#
+# Copyright 2017 Red Hat, Inc. and/or its affiliates
+# and other contributors as indicated by the @author tags.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
 set -euo pipefail
 if [ -n "${DEBUG:-}" ] ; then
     set -x
 fi
 
-if [[ $# -eq 0 ]]
-then
-  all=true
-fi
+declare -a components=()
 
 while (($#))
 do
-  case $1 in
-    kibana)
-      kibana=true
+case $1 in
+    kibana|fluentd|curator|elasticsearch)
+      components+=($1)
       ;;
-    fluentd)
-      fluentd=true
+    --namespace=*)
+      NAMESPACE=${1#*=}
       ;;
-    curator)
-      curator=true
-      ;;
-    elasticsearch)
-      elasticsearch=true
+    --outdir=*)
+      target=${1#*=}
       ;;
     *)
-      echo Unknown argument $1
-      exit 1
+      echo Ignoring unknown argument $1
       ;;
   esac
   shift
 done
 
+if [[ ${#components[@]} -eq 0 ]]
+then
+    components=( "kibana" "fluentd" "curator" "elasticsearch" "project_info" )
+fi
+
+NAMESPACE=${NAMESPACE:-logging}
+
 DATE=`date +%Y%m%d_%H%M%S`
-target="logging-$DATE"
+target=${target:-"logging-$DATE"}
 logs_folder="$target/logs"
 es_folder="$target/es"
 fluentd_folder="$target/fluentd"
@@ -50,7 +66,7 @@ dump_resource_items() {
   done
 }
 
-get_project_info() {
+check_project_info() {
   mkdir $project_folder
   echo Getting general objects
   echo -- Nodes Description
@@ -251,26 +267,15 @@ check_elasticsearch() {
   fi
 }
 
-oc project logging
-mkdir $target
+oc project $NAMESPACE
+echo Retrieving results to $target
 
-if [ "$all" = true ]
+if [ ! -d ${target} ]
 then
-  get_project_info
+  mkdir -p $target
 fi
-if [ "$all" = true ] || [ "$fluentd" = true ]
-then
-  check_fluentd
-fi
-if [ "$all" = true ] || [ "$kibana" = true ]
-then
-  check_kibana
-fi
-if [ "$all" = true ] || [ "$curator" = true ]
-then
-  check_curator
-fi
-if [ "$all" = true ] || [ "$elasticsearch" = true ]
-then
-  check_elasticsearch
-fi
+
+for comp in "${components[@]}"
+do
+    eval "check_${comp}" || echo Unrecognized function check_${comp} to check component: ${comp}
+done
