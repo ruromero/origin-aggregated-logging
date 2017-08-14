@@ -1,39 +1,55 @@
 #!/bin/bash
+#
+# Copyright 2017 Red Hat, Inc. and/or its affiliates
+# and other contributors as indicated by the @author tags.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
 set -euo pipefail
 if [ -n "${DEBUG:-}" ] ; then
     set -x
 fi
 
-if [[ $# -eq 0 ]]
-then
-  all=true
-fi
+declare -a components=()
 
 while (($#))
 do
-  case $1 in
-    kibana)
-      kibana=true
+case $1 in
+    kibana|fluentd|curator|elasticsearch)
+      components+=($1)
       ;;
-    fluentd)
-      fluentd=true
+    --namespace=*)
+      NAMESPACE=${1#*=}
       ;;
-    curator)
-      curator=true
-      ;;
-    elasticsearch)
-      elasticsearch=true
+    --outdir=*)
+      target=${1#*=}
       ;;
     *)
-      echo Unknown argument $1
-      exit 1
+      echo Ignoring unknown argument $1
       ;;
   esac
   shift
 done
 
+if [[ ${#components[@]} -eq 0 ]]
+then
+    components=( "kibana" "fluentd" "curator" "elasticsearch" "project_info" )
+fi
+
+NAMESPACE=${NAMESPACE:-logging}
+
 DATE=`date +%Y%m%d_%H%M%S`
-target="logging-$DATE"
+target=${target:-"logging-$DATE"}
 logs_folder="$target/logs"
 es_folder="$target/es"
 fluentd_folder="$target/fluentd"
@@ -50,7 +66,7 @@ dump_resource_items() {
   done
 }
 
-get_project_info() {
+check_project_info() {
   mkdir $project_folder
   echo Getting general objects
   echo -- Nodes Description
@@ -126,7 +142,7 @@ check_fluentd_connectivity() {
 
 check_fluentd() {
   echo -- Checking Fluentd health
-  fluentd_pods=$(oc get pods | grep -o logging-fluentd-[^[:blank:]]*)
+  fluentd_pods=$(oc get pods -l logging-infra=fluentd -o jsonpath={.items[*].metadata.name})
   mkdir $fluentd_folder
   for pod in $fluentd_pods
   do
@@ -160,7 +176,7 @@ check_curator_connectivity() {
 
 check_curator() {
   echo -- Checking Curator health
-  local curator_pods=$(oc get pods | grep -o logging-curator-[^[:blank:]]*)
+  local curator_pods=$(oc get pods -l logging-infra=curator -o jsonpath={.items[*].metadata.name})
   mkdir $curator_folder
   for pod in $curator_pods
   do
@@ -184,7 +200,7 @@ check_kibana_connectivity() {
 
 check_kibana() {
   echo -- Checking Kibana health
-  kibana_pods=$(oc get pods | grep -o logging-kibana-[^[:blank:]]*)
+  kibana_pods=$(oc get pods -l logging-infra=kibana -o jsonpath={.items[*].metadata.name})
   mkdir $kibana_folder
   for pod in $kibana_pods
   do
@@ -196,8 +212,13 @@ check_kibana() {
 }
 
 get_elasticsearch_status() {
-  local pod=$1
-  local cluster_folder=$es_folder/cluster-$2
+  local comp=$1
+  local pod=${2:-""}
+  if [ -z "$pod" ] ; then
+      echo "Skipping elasticsearch status because no pod was found for $1"
+      return
+  fi
+  local cluster_folder=$es_folder/cluster-$comp
   mkdir $cluster_folder
   curl_es='curl -s --max-time 5 --key /etc/elasticsearch/secret/admin-key --cert /etc/elasticsearch/secret/admin-cert --cacert /etc/elasticsearch/secret/admin-ca https://localhost:9200'
   local cat_items=(health nodes indices aliases thread_pool)
@@ -229,7 +250,7 @@ list_es_storage() {
 check_elasticsearch() {
   echo Checking Elasticsearch health
   echo -- Checking Elasticsearch health
-  local es_pods=$(oc get pods | grep -o logging-es-[^[:blank:]]*)
+  local es_pods=$(oc get pods -l logging-infra=elasticsearch -o jsonpath={.items[*].metadata.name})
   mkdir $es_folder
   for pod in $es_pods
   do
@@ -238,39 +259,25 @@ check_elasticsearch() {
     get_pod_logs $pod $es_folder
     list_es_storage $pod
   done
-  echo -- Getting Elasticsearch cluster info from logging-es pod
-  local anypod=$(oc get pods --selector="component=es" --no-headers | grep Running | awk '{print$1}' | tail -1)
-  get_elasticsearch_status $anypod es
-  echo -- Getting Elasticsearch OPS cluster info from logging-es-ops pod
-  anypod=$(oc get po --selector="component=es-ops" --no-headers | grep Running | awk '{print$1}' | tail -1 || :)
-  if [ -z "$anypod" ]
-  then
-    echo No es-ops pods found. Skipping...
-  else
-    get_elasticsearch_status $anypod es-ops
-  fi
+
+  local anypod=""
+  for comp in "es" "es-ops"
+  do
+    echo -- Getting Elasticsearch cluster info from logging-${comp} pod
+    anypod=$(oc get po --selector="component=${comp}" --no-headers | grep Running | awk '{print$1}' | tail -1 || :)
+    get_elasticsearch_status ${comp} ${anypod}
+  done
 }
 
-oc project logging
-mkdir $target
+oc project $NAMESPACE
+echo Retrieving results to $target
 
-if [ "$all" = true ]
+if [ ! -d ${target} ]
 then
-  get_project_info
+  mkdir -p $target
 fi
-if [ "$all" = true ] || [ "$fluentd" = true ]
-then
-  check_fluentd
-fi
-if [ "$all" = true ] || [ "$kibana" = true ]
-then
-  check_kibana
-fi
-if [ "$all" = true ] || [ "$curator" = true ]
-then
-  check_curator
-fi
-if [ "$all" = true ] || [ "$elasticsearch" = true ]
-then
-  check_elasticsearch
-fi
+
+for comp in "${components[@]}"
+do
+    eval "check_${comp}" || echo Unrecognized function check_${comp} to check component: ${comp}
+done
