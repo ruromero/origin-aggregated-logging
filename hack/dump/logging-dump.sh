@@ -44,9 +44,9 @@ project_folder="$target/project"
 dump_resource_items() {
   local type=$1
   mkdir $project_folder/$type
-  for resource in `oc get $type -o name`
+  for resource in `oc get $type -o jsonpath='{.items[*].metadata.name}'`
   do
-    oc get $resource -o yaml > $project_folder/$resource
+    oc get $type $resource -o yaml > $project_folder/$type/$resource
   done
 }
 
